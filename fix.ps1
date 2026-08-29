@@ -13,9 +13,15 @@ if (-not (Test-Path $backup)) {
 
 $code = [System.IO.File]::ReadAllText($extPath)
 
-if ($code.Contains("__agyAutoPreload")) {
-    Write-Host "[+] Already patched! All conversation histories are active." -ForegroundColor Green
+if ($code.Contains("__agyAutoPreload") -and $code.Contains("LoadTrajectory")) {
+    Write-Host "[+] Already patched with fast LoadTrajectory RPC! All conversation histories are active." -ForegroundColor Green
     exit 0
+}
+
+# If old patch is present, restore from backup first
+if ($code.Contains("__agyAutoPreload") -and (Test-Path $backup)) {
+    Copy-Item $backup $extPath -Force
+    $code = [System.IO.File]::ReadAllText($extPath)
 }
 
 $helper = @"
@@ -42,14 +48,14 @@ function __agyAutoPreload(port, csrf) {
               const _req = _http.request({
                 hostname: "127.0.0.1",
                 port: port,
-                path: "/exa.language_server_pb.LanguageServerService/GetCascadeTrajectorySteps",
+                path: "/exa.language_server_pb.LanguageServerService/LoadTrajectory",
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
                   "x-codeium-csrf-token": csrf,
                   "Connect-Protocol-Version": "1"
                 },
-                timeout: 2000
+                timeout: 5000
               }, function() {});
               _req.on("error", function() {});
               _req.write(JSON.stringify({ cascadeId: _cid }));
@@ -70,7 +76,7 @@ if ($code.Contains($target)) {
     $idx = $code.IndexOf($target)
     $newCode = $helper + "`n" + $code.Substring(0, $idx) + $replacement + $code.Substring($idx + $target.Length)
     [System.IO.File]::WriteAllText($extPath, $newCode)
-    Write-Host "[+] SUCCESS: Antigravity IDE permanently patched! Please restart the IDE." -ForegroundColor Green
+    Write-Host "[+] SUCCESS: Antigravity IDE permanently patched with fast LoadTrajectory RPC! Please restart the IDE." -ForegroundColor Green
 } else {
     Write-Host "[!] Target integration point not found in extension.js." -ForegroundColor Red
 }

@@ -31,9 +31,15 @@ def fix_antigravity():
     with open(ext_path, "r", encoding="utf-8") as f:
         code = f.read()
         
-    if "__agyAutoPreload" in code:
-        print("[+] Antigravity IDE is already patched! All conversation histories are active.")
+    if "__agyAutoPreload" in code and "LoadTrajectory" in code:
+        print("[+] Antigravity IDE is already patched with LoadTrajectory RPC! All conversation histories are active.")
         return True
+    
+    # If old version with GetCascadeTrajectorySteps was present, revert from backup first
+    if "__agyAutoPreload" in code and os.path.exists(backup_path):
+        shutil.copy2(backup_path, ext_path)
+        with open(ext_path, "r", encoding="utf-8") as f:
+            code = f.read()
         
     helper_code = """
 function __agyAutoPreload(port, csrf) {
@@ -58,14 +64,14 @@ function __agyAutoPreload(port, csrf) {
               const _req = _http.request({
                 hostname: "127.0.0.1",
                 port: port,
-                path: "/exa.language_server_pb.LanguageServerService/GetCascadeTrajectorySteps",
+                path: "/exa.language_server_pb.LanguageServerService/LoadTrajectory",
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
                   "x-codeium-csrf-token": csrf,
                   "Connect-Protocol-Version": "1"
                 },
-                timeout: 2000
+                timeout: 5000
               }, function() {});
               _req.on("error", function() {});
               _req.write(JSON.stringify({ cascadeId: _cid }));
@@ -86,7 +92,7 @@ function __agyAutoPreload(port, csrf) {
         new_code = helper_code + "\n" + code.replace(target, replacement, 1)
         with open(ext_path, "w", encoding="utf-8") as f:
             f.write(new_code)
-        print("[+] SUCCESS: Patch applied! Restart Antigravity IDE to view all historical chats.")
+        print("[+] SUCCESS: Patch applied using fast LoadTrajectory RPC! Restart Antigravity IDE to view all historical chats.")
         return True
     else:
         print("[!] Integration point not found in extension.js.")
