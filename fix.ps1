@@ -13,11 +13,6 @@ if (-not (Test-Path $backup)) {
 
 $code = [System.IO.File]::ReadAllText($extPath)
 
-if ($code.Contains("__agyAutoPreload") -and $code.Contains("LoadTrajectory")) {
-    Write-Host "[+] Already patched with fast LoadTrajectory RPC! All conversation histories are active." -ForegroundColor Green
-    exit 0
-}
-
 # If old patch is present, restore from backup first
 if ($code.Contains("__agyAutoPreload") -and (Test-Path $backup)) {
     Copy-Item $backup $extPath -Force
@@ -26,17 +21,34 @@ if ($code.Contains("__agyAutoPreload") -and (Test-Path $backup)) {
 
 $helper = @"
 
-function __agyAutoPreload(port, csrf) {
+function __agyAutoPreload(proc) {
   try {
+    if (!proc) return;
     const _fs = require("fs");
     const _path = require("path");
     const _os = require("os");
     const _http = require("http");
+    const _https = require("https");
+    const _url = require("url");
+    let addr = proc.address;
+    let csrf = proc.csrfToken;
+    let port = proc.httpPort || proc.port;
+    let isHttps = false;
+    let hostname = "127.0.0.1";
+    if (addr) {
+      try {
+        const parsed = new _url.URL(addr);
+        hostname = parsed.hostname || "127.0.0.1";
+        port = parsed.port || port;
+        isHttps = (parsed.protocol === "https:");
+      } catch (e) {}
+    }
+    if (!port || !csrf) return;
+    const client = isHttps ? _https : _http;
     const _dirs = [
       _path.join(_os.homedir(), ".gemini", "antigravity-ide", "conversations"),
       _path.join(_os.homedir(), ".gemini", "antigravity", "conversations")
     ];
-    if (!port || !csrf) return;
     const _seen = new Set();
     for (const _d of _dirs) {
       if (_fs.existsSync(_d)) {
@@ -45,8 +57,8 @@ function __agyAutoPreload(port, csrf) {
             const _cid = _f.slice(0, -3);
             if (!_seen.has(_cid)) {
               _seen.add(_cid);
-              const _req = _http.request({
-                hostname: "127.0.0.1",
+              const _req = client.request({
+                hostname: hostname,
                 port: port,
                 path: "/exa.language_server_pb.LanguageServerService/LoadTrajectory",
                 method: "POST",
@@ -55,6 +67,7 @@ function __agyAutoPreload(port, csrf) {
                   "x-codeium-csrf-token": csrf,
                   "Connect-Protocol-Version": "1"
                 },
+                rejectUnauthorized: false,
                 timeout: 5000
               }, function() {});
               _req.on("error", function() {});
@@ -70,13 +83,13 @@ function __agyAutoPreload(port, csrf) {
 "@
 
 $target = "this.isFirstHeartbeatComplete||(this.isFirstHeartbeatComplete=!0,"
-$replacement = "this.isFirstHeartbeatComplete||(this.isFirstHeartbeatComplete=!0,__agyAutoPreload(this.process?.httpPort,this.process?.csrfToken),"
+$replacement = "this.isFirstHeartbeatComplete||(this.isFirstHeartbeatComplete=!0,__agyAutoPreload(this.process),"
 
 if ($code.Contains($target)) {
     $idx = $code.IndexOf($target)
     $newCode = $helper + "`n" + $code.Substring(0, $idx) + $replacement + $code.Substring($idx + $target.Length)
     [System.IO.File]::WriteAllText($extPath, $newCode)
-    Write-Host "[+] SUCCESS: Antigravity IDE permanently patched with fast LoadTrajectory RPC! Please restart the IDE." -ForegroundColor Green
+    Write-Host "[+] SUCCESS: Antigravity IDE permanently patched! Please restart the IDE." -ForegroundColor Green
 } else {
     Write-Host "[!] Target integration point not found in extension.js." -ForegroundColor Red
 }

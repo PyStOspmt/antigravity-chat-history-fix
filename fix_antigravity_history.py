@@ -31,28 +31,41 @@ def fix_antigravity():
     with open(ext_path, "r", encoding="utf-8") as f:
         code = f.read()
         
-    if "__agyAutoPreload" in code and "LoadTrajectory" in code:
-        print("[+] Antigravity IDE is already patched with LoadTrajectory RPC! All conversation histories are active.")
-        return True
-    
-    # If old version with GetCascadeTrajectorySteps was present, revert from backup first
+    # If old patch is present, restore from backup first
     if "__agyAutoPreload" in code and os.path.exists(backup_path):
         shutil.copy2(backup_path, ext_path)
         with open(ext_path, "r", encoding="utf-8") as f:
             code = f.read()
         
     helper_code = """
-function __agyAutoPreload(port, csrf) {
+function __agyAutoPreload(proc) {
   try {
+    if (!proc) return;
     const _fs = require("fs");
     const _path = require("path");
     const _os = require("os");
     const _http = require("http");
+    const _https = require("https");
+    const _url = require("url");
+    let addr = proc.address;
+    let csrf = proc.csrfToken;
+    let port = proc.httpPort || proc.port;
+    let isHttps = false;
+    let hostname = "127.0.0.1";
+    if (addr) {
+      try {
+        const parsed = new _url.URL(addr);
+        hostname = parsed.hostname || "127.0.0.1";
+        port = parsed.port || port;
+        isHttps = (parsed.protocol === "https:");
+      } catch (e) {}
+    }
+    if (!port || !csrf) return;
+    const client = isHttps ? _https : _http;
     const _dirs = [
       _path.join(_os.homedir(), ".gemini", "antigravity-ide", "conversations"),
       _path.join(_os.homedir(), ".gemini", "antigravity", "conversations")
     ];
-    if (!port || !csrf) return;
     const _seen = new Set();
     for (const _d of _dirs) {
       if (_fs.existsSync(_d)) {
@@ -61,8 +74,8 @@ function __agyAutoPreload(port, csrf) {
             const _cid = _f.slice(0, -3);
             if (!_seen.has(_cid)) {
               _seen.add(_cid);
-              const _req = _http.request({
-                hostname: "127.0.0.1",
+              const _req = client.request({
+                hostname: hostname,
                 port: port,
                 path: "/exa.language_server_pb.LanguageServerService/LoadTrajectory",
                 method: "POST",
@@ -71,6 +84,7 @@ function __agyAutoPreload(port, csrf) {
                   "x-codeium-csrf-token": csrf,
                   "Connect-Protocol-Version": "1"
                 },
+                rejectUnauthorized: false,
                 timeout: 5000
               }, function() {});
               _req.on("error", function() {});
@@ -86,13 +100,13 @@ function __agyAutoPreload(port, csrf) {
 """
 
     target = "this.isFirstHeartbeatComplete||(this.isFirstHeartbeatComplete=!0,"
-    replacement = "this.isFirstHeartbeatComplete||(this.isFirstHeartbeatComplete=!0,__agyAutoPreload(this.process?.httpPort,this.process?.csrfToken),"
+    replacement = "this.isFirstHeartbeatComplete||(this.isFirstHeartbeatComplete=!0,__agyAutoPreload(this.process),"
 
     if target in code:
         new_code = helper_code + "\n" + code.replace(target, replacement, 1)
         with open(ext_path, "w", encoding="utf-8") as f:
             f.write(new_code)
-        print("[+] SUCCESS: Patch applied using fast LoadTrajectory RPC! Restart Antigravity IDE to view all historical chats.")
+        print("[+] SUCCESS: Robust patch applied! Restart Antigravity IDE to view all historical chats.")
         return True
     else:
         print("[!] Integration point not found in extension.js.")
