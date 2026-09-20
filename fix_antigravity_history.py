@@ -66,6 +66,7 @@ function __agyAutoPreload(proc) {
       _path.join(_os.homedir(), ".gemini", "antigravity-ide", "conversations"),
       _path.join(_os.homedir(), ".gemini", "antigravity", "conversations")
     ];
+    const _cids = [];
     const _seen = new Set();
     for (const _d of _dirs) {
       if (_fs.existsSync(_d)) {
@@ -74,27 +75,41 @@ function __agyAutoPreload(proc) {
             const _cid = _f.slice(0, -3);
             if (!_seen.has(_cid)) {
               _seen.add(_cid);
-              const _req = client.request({
-                hostname: hostname,
-                port: port,
-                path: "/exa.language_server_pb.LanguageServerService/LoadTrajectory",
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "x-codeium-csrf-token": csrf,
-                  "Connect-Protocol-Version": "1"
-                },
-                rejectUnauthorized: false,
-                timeout: 5000
-              }, function() {});
-              _req.on("error", function() {});
-              _req.write(JSON.stringify({ cascadeId: _cid }));
-              _req.end();
+              _cids.push(_cid);
             }
           }
         }
       }
     }
+    let _idx = 0;
+    function _loadNext() {
+      if (_idx >= _cids.length) return;
+      const _cid = _cids[_idx++];
+      try {
+        const _req = client.request({
+          hostname: hostname,
+          port: port,
+          path: "/exa.language_server_pb.LanguageServerService/LoadTrajectory",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-codeium-csrf-token": csrf,
+            "Connect-Protocol-Version": "1"
+          },
+          rejectUnauthorized: false,
+          timeout: 5000
+        }, function(res) {
+          res.on("data", function() {});
+          res.on("end", function() { setTimeout(_loadNext, 15); });
+        });
+        _req.on("error", function() { setTimeout(_loadNext, 15); });
+        _req.write(JSON.stringify({ cascadeId: _cid }));
+        _req.end();
+      } catch (e) {
+        setTimeout(_loadNext, 15);
+      }
+    }
+    _loadNext();
   } catch (_e) {}
 }
 """
@@ -106,7 +121,7 @@ function __agyAutoPreload(proc) {
         new_code = helper_code + "\n" + code.replace(target, replacement, 1)
         with open(ext_path, "w", encoding="utf-8") as f:
             f.write(new_code)
-        print("[+] SUCCESS: Robust patch applied! Restart Antigravity IDE to view all historical chats.")
+        print("[+] SUCCESS: Paced sequential patch applied! Restart Antigravity IDE to view all historical chats.")
         return True
     else:
         print("[!] Integration point not found in extension.js.")
