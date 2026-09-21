@@ -28,25 +28,26 @@ def fix_antigravity():
         shutil.copy2(ext_path, backup_path)
         print(f"[*] Created backup at: {backup_path}")
         
+    # If original_backup exists, restore from it to get clean base
+    orig_backup = ext_path + ".original_backup"
+    if os.path.exists(orig_backup):
+        shutil.copy2(orig_backup, ext_path)
+    elif os.path.exists(backup_path):
+        shutil.copy2(backup_path, ext_path)
+
     with open(ext_path, "r", encoding="utf-8") as f:
         code = f.read()
-        
-    # If old patch is present, restore from backup first
-    if "__agyAutoPreload" in code and os.path.exists(backup_path):
-        shutil.copy2(backup_path, ext_path)
-        with open(ext_path, "r", encoding="utf-8") as f:
-            code = f.read()
-        
-    helper_code = """
+
+    esm_imports = """import * as __agy_fs from "node:fs";
+import * as __agy_path from "node:path";
+import * as __agy_os from "node:os";
+import * as __agy_http from "node:http";
+import * as __agy_https from "node:https";
+import * as __agy_url from "node:url";
+
 function __agyAutoPreload(proc) {
   try {
     if (!proc) return;
-    const _fs = require("fs");
-    const _path = require("path");
-    const _os = require("os");
-    const _http = require("http");
-    const _https = require("https");
-    const _url = require("url");
     let addr = proc.address;
     let csrf = proc.csrfToken;
     let port = proc.httpPort || proc.port;
@@ -54,39 +55,39 @@ function __agyAutoPreload(proc) {
     let hostname = "127.0.0.1";
     if (addr) {
       try {
-        const parsed = new _url.URL(addr);
+        const parsed = new __agy_url.URL(addr);
         hostname = parsed.hostname || "127.0.0.1";
         port = parsed.port || port;
         isHttps = (parsed.protocol === "https:");
       } catch (e) {}
     }
     if (!port || !csrf) return;
-    const client = isHttps ? _https : _http;
-    const _dirs = [
-      _path.join(_os.homedir(), ".gemini", "antigravity-ide", "conversations"),
-      _path.join(_os.homedir(), ".gemini", "antigravity", "conversations")
+    const client = isHttps ? __agy_https : __agy_http;
+    const dirs = [
+      __agy_path.join(__agy_os.homedir(), ".gemini", "antigravity-ide", "conversations"),
+      __agy_path.join(__agy_os.homedir(), ".gemini", "antigravity", "conversations")
     ];
-    const _cids = [];
-    const _seen = new Set();
-    for (const _d of _dirs) {
-      if (_fs.existsSync(_d)) {
-        for (const _f of _fs.readdirSync(_d)) {
-          if ((_f.endsWith(".db") && !_f.endsWith("-wal") && !_f.endsWith("-shm")) || (_f.endsWith(".pb") && _f.length === 39)) {
-            const _cid = _f.slice(0, -3);
-            if (!_seen.has(_cid)) {
-              _seen.add(_cid);
-              _cids.push(_cid);
+    const cids = [];
+    const seen = new Set();
+    for (const d of dirs) {
+      if (__agy_fs.existsSync(d)) {
+        for (const f of __agy_fs.readdirSync(d)) {
+          if ((f.endsWith(".db") && !f.endsWith("-wal") && !f.endsWith("-shm")) || (f.endsWith(".pb") && f.length === 39)) {
+            const cid = f.slice(0, -3);
+            if (!_seen.has(cid)) {
+              seen.add(cid);
+              cids.push(cid);
             }
           }
         }
       }
     }
-    let _idx = 0;
-    function _loadNext() {
-      if (_idx >= _cids.length) return;
-      const _cid = _cids[_idx++];
+    let idx = 0;
+    function loadNext() {
+      if (idx >= cids.length) return;
+      const cid = cids[idx++];
       try {
-        const _req = client.request({
+        const req = client.request({
           hostname: hostname,
           port: port,
           path: "/exa.language_server_pb.LanguageServerService/LoadTrajectory",
@@ -100,17 +101,17 @@ function __agyAutoPreload(proc) {
           timeout: 5000
         }, function(res) {
           res.on("data", function() {});
-          res.on("end", function() { setTimeout(_loadNext, 15); });
+          res.on("end", function() { setTimeout(loadNext, 15); });
         });
-        _req.on("error", function() { setTimeout(_loadNext, 15); });
-        _req.write(JSON.stringify({ cascadeId: _cid }));
-        _req.end();
+        req.on("error", function() { setTimeout(loadNext, 15); });
+        req.write(JSON.stringify({ cascadeId: cid }));
+        req.end();
       } catch (e) {
-        setTimeout(_loadNext, 15);
+        setTimeout(loadNext, 15);
       }
     }
-    _loadNext();
-  } catch (_e) {}
+    loadNext();
+  } catch (err) {}
 }
 """
 
@@ -118,10 +119,10 @@ function __agyAutoPreload(proc) {
     replacement = "this.isFirstHeartbeatComplete||(this.isFirstHeartbeatComplete=!0,__agyAutoPreload(this.process),"
 
     if target in code:
-        new_code = helper_code + "\n" + code.replace(target, replacement, 1)
+        new_code = esm_imports + "\n" + code.replace(target, replacement, 1)
         with open(ext_path, "w", encoding="utf-8") as f:
             f.write(new_code)
-        print("[+] SUCCESS: Paced sequential patch applied! Restart Antigravity IDE to view all historical chats.")
+        print("[+] SUCCESS: Native ESM patch applied! Restart Antigravity IDE to view all historical chats.")
         return True
     else:
         print("[!] Integration point not found in extension.js.")
