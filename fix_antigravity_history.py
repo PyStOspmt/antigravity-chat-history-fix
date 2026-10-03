@@ -24,16 +24,22 @@ def fix_antigravity():
     print(f"[*] Found extension.js at: {ext_path}")
     
     backup_path = ext_path + ".backup"
-    if not os.path.exists(backup_path):
-        shutil.copy2(ext_path, backup_path)
-        print(f"[*] Created backup at: {backup_path}")
-        
-    # If original_backup exists, restore from it to get clean base
     orig_backup = ext_path + ".original_backup"
-    if os.path.exists(orig_backup):
-        shutil.copy2(orig_backup, ext_path)
-    elif os.path.exists(backup_path):
-        shutil.copy2(backup_path, ext_path)
+
+    with open(ext_path, "r", encoding="utf-8") as f:
+        current_code = f.read()
+
+    is_currently_patched = "__agyAutoPreload" in current_code
+
+    if not is_currently_patched:
+        shutil.copy2(ext_path, orig_backup)
+        shutil.copy2(ext_path, backup_path)
+        print(f"[*] Created original backup at: {orig_backup}")
+    else:
+        if os.path.exists(orig_backup):
+            shutil.copy2(orig_backup, ext_path)
+        elif os.path.exists(backup_path):
+            shutil.copy2(backup_path, ext_path)
 
     with open(ext_path, "r", encoding="utf-8") as f:
         code = f.read()
@@ -74,7 +80,7 @@ function __agyAutoPreload(proc) {
         for (const f of __agy_fs.readdirSync(d)) {
           if ((f.endsWith(".db") && !f.endsWith("-wal") && !f.endsWith("-shm")) || (f.endsWith(".pb") && f.length === 39)) {
             const cid = f.slice(0, -3);
-            if (!_seen.has(cid)) {
+            if (!seen.has(cid)) {
               seen.add(cid);
               cids.push(cid);
             }

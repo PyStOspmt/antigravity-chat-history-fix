@@ -8,12 +8,19 @@ if (-not (Test-Path $extPath)) {
 $origBackup = "$extPath.original_backup"
 $backup = "$extPath.backup"
 
-if (Test-Path $origBackup) {
-    Copy-Item $origBackup $extPath -Force
-} elseif (Test-Path $backup) {
-    Copy-Item $backup $extPath -Force
+$currentCode = [System.IO.File]::ReadAllText($extPath)
+$isPatched = $currentCode.Contains("__agyAutoPreload")
+
+if (-not $isPatched) {
+    Copy-Item $extPath $origBackup -Force
+    Copy-Item $extPath $backup -Force
+    Write-Host "[*] Created original backup at $origBackup" -ForegroundColor Cyan
 } else {
-    Copy-Item $extPath $backup
+    if (Test-Path $origBackup) {
+        Copy-Item $origBackup $extPath -Force
+    } elseif (Test-Path $backup) {
+        Copy-Item $backup $extPath -Force
+    }
 }
 
 $code = [System.IO.File]::ReadAllText($extPath)
@@ -53,7 +60,7 @@ function __agyAutoPreload(proc) {
     for (const d of dirs) {
       if (__agy_fs.existsSync(d)) {
         for (const f of __agy_fs.readdirSync(d)) {
-          if ((f.endsWith(".db") && !_f.endsWith("-wal") && !_f.endsWith("-shm")) || (_f.endsWith(".pb") && _f.length === 39)) {
+          if ((f.endsWith(".db") && !f.endsWith("-wal") && !f.endsWith("-shm")) || (f.endsWith(".pb") && f.length === 39)) {
             const cid = f.slice(0, -3);
             if (!seen.has(cid)) {
               seen.add(cid);
